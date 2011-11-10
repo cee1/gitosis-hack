@@ -1,4 +1,4 @@
-import os, logging
+import os, logging, re
 from ConfigParser import NoSectionError, NoOptionError
 
 from gitosis import group
@@ -34,41 +34,56 @@ def haveAccess(config, user, mode, path):
         path = basename
 
     for groupname in group.getMembership(config=config, user=user):
-        try:
-            repos = config.get('group %s' % groupname, mode)
-        except (NoSectionError, NoOptionError):
-            repos = []
-        else:
-            repos = repos.split()
+        section = 'group %s' % groupname
 
         mapping = None
-
-        if path in repos:
-            log.debug(
-                'Access ok for %(user)r as %(mode)r on %(path)r'
-                % dict(
-                user=user,
-                mode=mode,
-                path=path,
-                ))
-            mapping = path
-        else:
+        reason = ''
+        for i in xrange(1):
+            # First: try to make an exactly match
             try:
-                mapping = config.get('group %s' % groupname,
+                repos = config.get(section, mode)
+            except (NoSectionError, NoOptionError):
+                pass
+            else:
+                repos = repos.split()
+                if path in repos:
+                    mapping = path
+                    break
+
+            # Second: try to find 'map <mode> <path>' option
+            try:
+                mapping = config.get(section,
                                      'map %s %s' % (mode, path))
             except (NoSectionError, NoOptionError):
                 pass
             else:
-                log.debug(
-                    'Access ok for %(user)r as %(mode)r on %(path)r=%(mapping)r'
-                    % dict(
-                    user=user,
-                    mode=mode,
-                    path=path,
-                    mapping=mapping,
-                    ))
+                reason = '=%r' % mapping
+                break
 
+            # Third: try to match against regex if any
+            try:
+                repos_regex = config.get(section, mode + '_regex')
+            except (NoSectionError, NoOptionError):
+                pass
+            else:
+                repos_regex = repos_regex.split()
+                for r in repos_regex:
+                    if re.match(r, path):
+                        mapping = path
+                        reason = ' (pattern=%r)' % r
+                        break
+                if mapping: break
+ 
         if mapping is not None:
+            log.debug(
+                'Access ok for %(user)r as %(mode)r on %(path)r%(reason)s'
+                % dict(
+                user=user,
+                mode=mode,
+                path=path,
+                reason=reason,
+                ))
+
             prefix = None
             try:
                 prefix = config.get(
