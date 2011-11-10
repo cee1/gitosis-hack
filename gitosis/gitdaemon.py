@@ -1,6 +1,7 @@
 import errno
 import logging
 import os
+import re
 
 from ConfigParser import NoSectionError, NoOptionError
 
@@ -52,6 +53,17 @@ def set_export_ok(config):
         else:
             raise e
 
+    def collect_pattern(config):
+        config.repo_patterns = {}
+        for section in config.sections():
+            if section.startswith('repo ') and config.has_option(section, 'path_regex'):
+                try:
+                    enable = config.getboolean(section, 'daemon')
+                    r = re.compile(config.get(section, 'path_regex'))
+                    config.repo_patterns[r] = enable
+                except (NoOptionError, re.Error):
+                    log.debug('No daemon or Bad regex express for section %r', section)
+
     for (dirpath, dirnames, filenames) \
             in os.walk(repositories, onerror=_error):
         # oh how many times i have wished for os.walk to report
@@ -77,10 +89,16 @@ def set_export_ok(config):
             if reldir != '.':
                 name = os.path.join(reldir, name)
             assert ext == '.git'
+
+            enable = global_enable
             try:
                 enable = config.getboolean('repo %s' % name, 'daemon')
             except (NoSectionError, NoOptionError):
-                enable = global_enable
+                if not hasattr(config, 'repo_patterns'):
+                    collect_pattern(config)
+                for p in config.repo_patterns:
+                    if p.match(name):
+                        enable = config.repo_patterns[p]
 
             if enable:
                 log.debug('Allow %r', name)
