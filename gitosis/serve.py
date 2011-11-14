@@ -145,6 +145,9 @@ def serve(
         gitweb.set_descriptions(
             config=cfg,
             )
+        gitweb.set_owners(
+            config=cfg,
+            )
         generated = util.getGeneratedFilesDir(config=cfg)
         gitweb.generate_project_list(
             config=cfg,

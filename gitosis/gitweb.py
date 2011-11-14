@@ -25,9 +25,10 @@ To plug this into ``gitweb``, you have two choices.
    isolates the changes a bit more nicely. Recommended.
 """
 
-import os, urllib, logging
+import os, logging
 
 from ConfigParser import NoSectionError, NoOptionError
+import re
 
 from gitosis import util
 
@@ -83,16 +84,7 @@ def generate_project_list_fp(config, fp):
                     'Cannot find %(name)r in %(repositories)r'
                     % dict(name=name, repositories=repositories))
 
-        response = [name]
-        try:
-            owner = config.get(section, 'owner')
-        except (NoSectionError, NoOptionError):
-            pass
-        else:
-            response.append(owner)
-
-        line = ' '.join([urllib.quote_plus(s) for s in response])
-        print >>fp, line
+        print >>fp, name
 
 def generate_project_list(config, path):
     """
@@ -160,6 +152,82 @@ def set_descriptions(config):
         f = file(tmp, 'w')
         try:
             print >>f, description
+        finally:
+            f.close()
+        os.rename(tmp, path)
+
+
+def set_owners(config):
+    """
+    Set owners for gitweb use.
+    """
+    log = logging.getLogger('gitosis.gitweb.set_owners')
+
+    repositories = util.getRepositoryDir(config)
+
+    for section in config.sections():
+        l = section.split(None, 1)
+        type_ = l.pop(0)
+        if type_ != 'repo':
+            continue
+        if not l:
+            continue
+
+        try:
+            owner = config.get(section, 'owner')
+        except (NoSectionError, NoOptionError):
+            continue
+
+        if not owner:
+            continue
+
+        name, = l
+
+        if not os.path.exists(os.path.join(repositories, name)):
+            namedotgit = '%s.git' % name
+            if os.path.exists(os.path.join(repositories, namedotgit)):
+                name = namedotgit
+            else:
+                log.warning(
+                    'Cannot find %(name)r in %(repositories)r'
+                    % dict(name=name, repositories=repositories))
+                continue
+
+        path = os.path.join(
+            repositories,
+            name,
+            'config',
+            )
+
+        try:
+            _r_sec = re.compile('\s*\[[^\]]*\]')
+            _r_owner = re.compile('\s*owner\s?=')
+
+            gitcfg = open(path, 'r')
+
+            tmp = '%s.%d.tmp' % (path, os.getpid())
+            f = file(tmp, 'w')
+
+            for l in gitcfg:
+                f.write(l)
+                if l.strip() == '[gitweb]':
+                    break
+            else:
+                f.write('[gitweb]\n')
+
+            for l in gitcfg:
+                if _r_sec.match(l):
+                    f.write('\towner = %s\n' % owner)
+                    f.write(l)
+                    break
+                elif _r_owner.match(l):
+                    f.write('\towner = %s\n' % owner)
+                    break
+            else:
+                f.write('\towner = %s\n' % owner)
+
+            f.write(gitcfg.read())
+            
         finally:
             f.close()
         os.rename(tmp, path)
