@@ -47,6 +47,9 @@ class UnsafeArgumentsError(ServingError):
 class AccessDenied(ServingError):
     """Access denied to repository"""
 
+class BadRepositoryPath(ServingError):
+    """Intermediate repository path contains component ends with '.git'"""
+
 class WriteAccessDenied(AccessDenied):
     """Repository write access denied"""
 
@@ -125,37 +128,38 @@ def serve(
             # didn't have write access and tried to write
             raise WriteAccessDenied()
 
-    (topdir, relpath) = newpath
-    assert not relpath.endswith('.git'), \
-           'git extension should have been stripped: %r' % relpath
-    repopath = '%s.git' % relpath
-    fullpath = os.path.join(topdir, repopath)
+    (repobase, reponame) = newpath
+    assert not reponame.endswith('.git'), \
+           'git extension should have been stripped: %r' % reponame
+    repopath = reponame + '.git'
+    fullpath = os.path.join(repobase, repopath)
     if not os.path.exists(fullpath):
         # it doesn't exist on the filesystem, but the configuration
         # refers to it, we're serving a write request, and the user is
         # authorized to do that: create the repository on the fly
 
         # create leading directories
-        p = topdir
-        for segment in repopath.split(os.sep)[:-1]:
-            p = os.path.join(p, segment)
+        p = repobase
+        components = repopath.split(os.sep)[:-1]
+        for c in components: # Check
+            if c.endswith('.git'):
+                raise BadRepositoryPath()
+        for c in components:
+            p = os.path.join(p, c)
             util.mkdir(p, 0750)
 
         repository.init(path=fullpath)
-        gitweb.set_descriptions(
-            config=cfg,
-            )
-        gitweb.set_owners(
-            config=cfg,
-            )
+        util.RepositoryDir(cfg,
+                  (
+                  gitdaemon.DaemonProp(),
+                  gitweb.GitwebProp(),
+                  gitweb.DescriptionProp(),
+                  gitweb.OwnerProp()
+                  )).visit_one(reponame)
         generated = util.getGeneratedFilesDir(config=cfg)
-        gitweb.generate_project_list(
-            config=cfg,
-            path=os.path.join(generated, 'projects.list'),
-            )
-        gitdaemon.set_export_ok(
-            config=cfg,
-            )
+        gitweb.ProjectList(
+                          os.path.join(generated, 'projects.list')
+                          ).update()
 
     # put the verb back together with the new path
     newcmd = "%(verb)s '%(path)s'" % dict(

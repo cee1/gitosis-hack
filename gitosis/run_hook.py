@@ -31,20 +31,20 @@ def post_update(cfg, git_dir):
         )
     # re-read config to get up-to-date settings
     cfg.read(os.path.join(export, '..', 'gitosis.conf'))
-    gitweb.set_descriptions(
-        config=cfg,
-        )
-    gitweb.set_owners(
-        config=cfg,
-        )
+
+    util.RepositoryDir(cfg,
+                  (
+                  gitdaemon.DaemonProp(),
+                  gitweb.GitwebProp(),
+                  gitweb.DescriptionProp(),
+                  gitweb.OwnerProp()
+                  )).travel()
+
     generated = util.getGeneratedFilesDir(config=cfg)
-    gitweb.generate_project_list(
-        config=cfg,
-        path=os.path.join(generated, 'projects.list'),
-        )
-    gitdaemon.set_export_ok(
-        config=cfg,
-        )
+    gitweb.ProjectList(
+                      os.path.join(generated, 'projects.list')
+                      ).refresh()
+
     authorized_keys = util.getSSHAuthorizedKeysPath(config=cfg)
     ssh.writeAuthorizedKeys(
         path=authorized_keys,

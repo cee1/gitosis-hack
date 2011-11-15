@@ -26,10 +26,12 @@ To plug this into ``gitweb``, you have two choices.
 """
 
 import os, logging
-
-from ConfigParser import NoSectionError, NoOptionError
+import fcntl
 import re
 
+from ConfigParser import NoSectionError, NoOptionError
+
+log = logging.getLogger('gitosis.gitweb')
 from gitosis import util
 
 def _escape_filename(s):
@@ -38,114 +40,140 @@ def _escape_filename(s):
     s = s.replace('"', '\\"')
     return s
 
-def generate_project_list_fp(config, fp):
-    """
-    Generate projects list for ``gitweb``.
+_repos_allow = []
+_repos_disallow = []
 
-    :param config: configuration to read projects from
-    :type config: RawConfigParser
+class ProjectList(object):
+    log = logging.getLogger('gitosis.gitweb.ProjectList')
 
-    :param fp: writable for ``projects.list``
-    :type fp: (file-like, anything with ``.write(data)``)
-    """
-    log = logging.getLogger('gitosis.gitweb.generate_projects_list')
+    def __init__(self, path):
+        self.plist_path = path
+        self.__lock = None
 
-    repositories = util.getRepositoryDir(config)
+    def lock(self):
+        lk_path = self.plist_path + '.lock'
+        log = self.log
 
-    try:
-        global_enable = config.getboolean('gitosis', 'gitweb')
-    except (NoSectionError, NoOptionError):
-        global_enable = False
+        log.debug('Locking: %r', lk_path)
+        if self.__lock:
+            log.debug('Already Locked: %r', lk_path)
+            return
 
-    for section in config.sections():
-        l = section.split(None, 1)
-        type_ = l.pop(0)
-        if type_ != 'repo':
-            continue
-        if not l:
-            continue
+        self.__lock = file(lk_path, 'w')
+        fcntl.flock(self.__lock.fileno(), fcntl.LOCK_EX)
 
-        try:
-            enable = config.getboolean(section, 'gitweb')
-        except (NoSectionError, NoOptionError):
-            enable = global_enable
+        log.debug('Locked: %r', lk_path)
+        return
 
-        if not enable:
-            continue
+    def unlock(self):
+        lk_path = self.plist_path + '.lock'
+        log = self.log
 
-        name, = l
+        log.debug('UnLock: %r', lk_path)
+        if not self.__lock:
+            log.debug('Not Locked: %r', lk_path)
+            return
+        
+        self.__lock.close()
+        self.__lock = None
 
-        if not os.path.exists(os.path.join(repositories, name)):
-            namedotgit = '%s.git' % name
-            if os.path.exists(os.path.join(repositories, namedotgit)):
-                name = namedotgit
-            else:
-                log.warning(
-                    'Cannot find %(name)r in %(repositories)r'
-                    % dict(name=name, repositories=repositories))
+    def refresh(self):
+        tmp = self.plist_path + '.tmp'
 
-        print >>fp, name
-
-def generate_project_list(config, path):
-    """
-    Generate projects list for ``gitweb``.
-
-    :param config: configuration to read projects from
-    :type config: RawConfigParser
-
-    :param path: path to write projects list to
-    :type path: str
-    """
-    tmp = '%s.%d.tmp' % (path, os.getpid())
-
-    f = file(tmp, 'w')
-    try:
-        generate_project_list_fp(config=config, fp=f)
-    finally:
-        f.close()
-
-    os.rename(tmp, path)
-
-
-def set_descriptions(config):
-    """
-    Set descriptions for gitweb use.
-    """
-    log = logging.getLogger('gitosis.gitweb.set_descriptions')
-
-    repositories = util.getRepositoryDir(config)
-
-    for section in config.sections():
-        l = section.split(None, 1)
-        type_ = l.pop(0)
-        if type_ != 'repo':
-            continue
-        if not l:
-            continue
+        self.lock()
+        f = file(tmp, 'w')
 
         try:
-            description = config.get(section, 'description')
+            if _repos_allow:
+                f.write('\n'.join(_repos_allow))
+        except:
+            f.close()
+            os.remove(tmp)
+            self.unlock()
+
+            raise
+        else:
+            f.close()
+            os.rename(tmp, self.plist_path)
+            self.unlock()
+    
+    def update(self):
+        tmp = self.plist_path + '.tmp'
+
+        self.lock()
+        f = file(tmp, 'w')
+
+        try:
+            pj_list = file(self.plist_path, 'r')
+        except IOError:
+            pj_list = []
+
+        try:
+            for l in pj_list:
+                _l = l.strip()
+                if _l and _l not in _repos_disallow:
+                    f.write(l)
+                    if _l in _repos_allow:
+                        _repos_allow.remove(_l)
+
+            if _repos_allow:
+                f.write('\n')
+                f.write('\n'.join(_repos_allow))
+        except:
+            f.close()
+            os.remove(tmp)
+            self.unlock()
+
+            raise
+        else:
+            f.close()
+            os.rename(tmp, self.plist_path)
+            self.unlock()
+
+
+class GitwebProp(util.RepoProp):
+    name = "gitweb"
+
+    def __init__(self):
+        global _repos_allow, _repos_disallow
+        _repos_allow = []
+        _repos_disallow = []
+
+    def _get(self, config, section):
+        if not hasattr(self, 'default_value'):
+            try:
+                val = config.getboolean('gitosis', self.name)
+            except (NoSectionError, NoOptionError):
+                val = False
+            self.default_value = val
+
+            log.debug(
+                'Global default is %r',
+                {True: 'allow', False: 'deny'}.get(val),
+            )
+
+        try:
+            val = config.getboolean(section, self.name)
         except (NoSectionError, NoOptionError):
-            continue
+            val = self.default_value
+        return val
 
-        if not description:
-            continue
+    def action(self, repobase, reponame, enable):
+        repopath = reponame + '.git'
+        if enable:
+            log.debug('Allow %r', repopath)
+            _repos_allow.append(repopath)
+        else:
+            _repos_disallow.append(repopath)
+            log.debug('Deny %r', repopath)
 
-        name, = l
+class DescriptionProp(util.RepoProp):
+    name = 'description'
 
-        if not os.path.exists(os.path.join(repositories, name)):
-            namedotgit = '%s.git' % name
-            if os.path.exists(os.path.join(repositories, namedotgit)):
-                name = namedotgit
-            else:
-                log.warning(
-                    'Cannot find %(name)r in %(repositories)r'
-                    % dict(name=name, repositories=repositories))
-                continue
-
+    def action(self, repobase, reponame, description):
         path = os.path.join(
-            repositories,
-            name,
+            repobase,
+            reponame + '.git',
             'description',
             )
         tmp = '%s.%d.tmp' % (path, os.getpid())
@@ -156,58 +184,25 @@ def set_descriptions(config):
             f.close()
         os.rename(tmp, path)
 
+class OwnerProp(util.RepoProp):
+    name = 'owner'
 
-def set_owners(config):
-    """
-    Set owners for gitweb use.
-    """
-    log = logging.getLogger('gitosis.gitweb.set_owners')
-
-    repositories = util.getRepositoryDir(config)
-
-    for section in config.sections():
-        l = section.split(None, 1)
-        type_ = l.pop(0)
-        if type_ != 'repo':
-            continue
-        if not l:
-            continue
-
-        try:
-            owner = config.get(section, 'owner')
-        except (NoSectionError, NoOptionError):
-            continue
-
-        if not owner:
-            continue
-
-        name, = l
-
-        if not os.path.exists(os.path.join(repositories, name)):
-            namedotgit = '%s.git' % name
-            if os.path.exists(os.path.join(repositories, namedotgit)):
-                name = namedotgit
-            else:
-                log.warning(
-                    'Cannot find %(name)r in %(repositories)r'
-                    % dict(name=name, repositories=repositories))
-                continue
-
+    def action(self, repobase, reponame, owner):
         path = os.path.join(
-            repositories,
-            name,
+            repobase,
+            reponame + '.git',
             'config',
             )
 
+        _r_sec = re.compile('\s*\[[^\]]*\]')
+        _r_owner = re.compile('\s*owner\s?=')
+
+        gitcfg = open(path, 'r')
+
+        tmp = '%s.%d.tmp' % (path, os.getpid())
+        f = file(tmp, 'w')
+
         try:
-            _r_sec = re.compile('\s*\[[^\]]*\]')
-            _r_owner = re.compile('\s*owner\s?=')
-
-            gitcfg = open(path, 'r')
-
-            tmp = '%s.%d.tmp' % (path, os.getpid())
-            f = file(tmp, 'w')
-
             for l in gitcfg:
                 f.write(l)
                 if l.strip() == '[gitweb]':
@@ -227,7 +222,6 @@ def set_owners(config):
                 f.write('\towner = %s\n' % owner)
 
             f.write(gitcfg.read())
-            
         finally:
             f.close()
         os.rename(tmp, path)
