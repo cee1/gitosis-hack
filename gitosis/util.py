@@ -78,9 +78,9 @@ class RepositoryDir(object):
         config = self.config
         repo_patterns = {}
         for section in config.sections():
-            if section.startswith('repo ') and config.has_option(section, 'path_regex'):
+            if section.startswith('repo ') and config.has_option(section, 'path'):
                 try:
-                    r = re.compile(config.get(section, 'path_regex'))
+                    r = re.compile(config.get(section, 'path'))
                     repo_patterns[r] = section
                 except re.Error:
                     self.log.debug('Bad regex express for section %r', section)

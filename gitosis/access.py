@@ -38,42 +38,29 @@ def haveAccess(config, user, mode, path):
 
         mapping = None
         reason = ''
-        for i in xrange(1):
-            # First: try to make an exactly match
-            try:
-                repos = config.get(section, mode)
-            except (NoSectionError, NoOptionError):
-                pass
-            else:
-                repos = repos.split()
-                if path in repos:
-                    mapping = path
-                    break
 
-            # Second: try to find 'map <mode> <path>' option
-            try:
-                mapping = config.get(section,
-                                     'map %s %s' % (mode, path))
-            except (NoSectionError, NoOptionError):
-                pass
-            else:
-                reason = '=%r' % mapping
+        try:
+            repos = config.get(section, mode)
+        except (NoSectionError, NoOptionError):
+            continue
+        else:
+            repos = repos.split()
+
+        for r in repos:
+            if r == path: # exactly match: match [repo %s] or implict [repo %s]
+                mapping = path
                 break
 
-            # Third: try to match against regex if any
             try:
-                repos_regex = config.get(section, mode + '_regex')
+                p = config.get('repo %s' % r, 'path')
             except (NoSectionError, NoOptionError):
                 pass
             else:
-                repos_regex = repos_regex.split()
-                for r in repos_regex:
-                    if re.match(r, path):
-                        mapping = path
-                        reason = ' (pattern=%r)' % r
-                        break
-                if mapping: break
- 
+                if re.match(p, path):
+                    mapping = path
+                    reason = ' ([repo %s].path=%r)' % (r, p)
+                    break
+
         if mapping is not None:
             log.debug(
                 'Access ok for %(user)r as %(mode)r on %(path)r%(reason)s'
@@ -86,13 +73,9 @@ def haveAccess(config, user, mode, path):
 
             prefix = None
             try:
-                prefix = config.get(
-                    'group %s' % groupname, 'repositories')
+                prefix = config.get('gitosis', 'repositories')
             except (NoSectionError, NoOptionError):
-                try:
-                    prefix = config.get('gitosis', 'repositories')
-                except (NoSectionError, NoOptionError):
-                    prefix = 'repositories'
+                prefix = 'repositories'
 
             log.debug(
                 'Using prefix %(prefix)r for %(path)r'
