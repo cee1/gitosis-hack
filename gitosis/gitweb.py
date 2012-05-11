@@ -221,7 +221,8 @@ class OwnerProp(util.RepoProp):
             else:
                 f.write('\towner = %s\n' % owner)
 
-            f.write(gitcfg.read())
+            for l in gitcfg:
+                f.write(l)
         finally:
             f.close()
         os.rename(tmp, path)
