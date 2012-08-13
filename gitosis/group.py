@@ -1,23 +1,15 @@
 import logging
-from ConfigParser import NoSectionError, NoOptionError
+from gitosis.gitoliteConfig import GitoliteConfigException
 
 def _getMembership(config, user, seen):
     log = logging.getLogger('gitosis.group.getMembership')
 
-    for section in config.sections():
-        GROUP_PREFIX = 'group '
-        if not section.startswith(GROUP_PREFIX):
-            continue
-        group = section[len(GROUP_PREFIX):]
-        if group in seen:
-            continue
-
+    for group in config.groups():
         try:
-            members = config.get(section, 'members')
-        except (NoSectionError, NoOptionError):
+            members = config.get_group_members(group)
+        except GitoliteConfigException:
+            log.exception("When list members of '%s':" % group)
             members = []
-        else:
-            members = members.split()
 
         # @all is the only group where membership needs to be
         # bootstrapped like this, anything else gets started from the
@@ -32,7 +24,7 @@ def _getMembership(config, user, seen):
             yield group
 
             for member_of in _getMembership(
-                config, '@%s' % group, seen,
+                config, group, seen,
                 ):
                 yield member_of
 
@@ -51,5 +43,5 @@ def getMembership(config, user):
         yield member_of
 
     # everyone is always a member of group "all"
-    yield 'all'
+    yield '@all'
 

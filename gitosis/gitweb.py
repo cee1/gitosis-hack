@@ -29,7 +29,7 @@ import os, logging
 import fcntl
 import re
 
-from ConfigParser import NoSectionError, NoOptionError
+from gitosis.gitoliteConfig import GitoliteConfigException
 
 log = logging.getLogger('gitosis.gitweb')
 from gitosis import util
@@ -139,27 +139,20 @@ class GitwebProp(util.RepoProp):
         _repos_allow = []
         _repos_disallow = []
 
-    def _get(self, config, section):
-        if not hasattr(self, 'default_value'):
-            try:
-                val = config.getboolean('gitosis', self.name)
-            except (NoSectionError, NoOptionError):
-                val = False
-            self.default_value = val
-
-            log.debug(
-                'Global default is %r',
-                {True: 'allow', False: 'deny'}.get(val),
-            )
-
+    def _get(self, config, reponame):
         try:
-            val = config.getboolean(section, self.name)
-        except (NoSectionError, NoOptionError):
-            val = self.default_value
-        return val
+            users = config.get_repo(reponame, 'R')
+        except GitoliteConfigException:
+            log.exception('Failed to get users that can read(Only) repo \'%s\'' % reponame)
+            return
 
-    def action(self, repobase, reponame, enable):
-        repopath = reponame + '.git'
+        if users and 'gitweb' in users:
+            return True
+
+        return False
+
+    def action(self, repobase, name, reponame, enable):
+        repopath = name + '.git'
         if enable:
             log.debug('Allow %r', repopath)
             _repos_allow.append(repopath)
@@ -170,10 +163,10 @@ class GitwebProp(util.RepoProp):
 class DescriptionProp(util.RepoProp):
     name = 'description'
 
-    def action(self, repobase, reponame, description):
+    def action(self, repobase, name, reponame, description):
         path = os.path.join(
             repobase,
-            reponame + '.git',
+            name + '.git',
             'description',
             )
         tmp = '%s.%d.tmp' % (path, os.getpid())
@@ -187,10 +180,10 @@ class DescriptionProp(util.RepoProp):
 class OwnerProp(util.RepoProp):
     name = 'owner'
 
-    def action(self, repobase, reponame, owner):
+    def action(self, repobase, name, reponame, owner):
         path = os.path.join(
             repobase,
-            reponame + '.git',
+            name + '.git',
             'config',
             )
 

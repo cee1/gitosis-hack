@@ -1,7 +1,7 @@
-import os, logging, re
-from ConfigParser import NoSectionError, NoOptionError
+import os, logging
 
 from gitosis import group
+from gitosis.gitoliteConfig import GitoliteConfigException
 
 def haveAccess(config, user, mode, path):
     """
@@ -13,6 +13,7 @@ def haveAccess(config, user, mode, path):
     Returns ``None`` for no access, or a tuple of toplevel directory
     containing repositories and a relative path to the physical repository.
     """
+    detail = []
     log = logging.getLogger('gitosis.access.haveAccess')
 
     log.debug(
@@ -33,54 +34,55 @@ def haveAccess(config, user, mode, path):
             ))
         path = basename
 
-    for groupname in group.getMembership(config=config, user=user):
-        section = 'group %s' % groupname
+    repo = None
+    try:
+        repo = config.lookup_repo(path)
+    except GitoliteConfigException:
+        log.exception("When lookup which repo contains '%s'" % path)
 
-        mapping = None
-        reason = ''
+    if not repo:
+        log.warning("No repo contains path '%s'" % path)
+        return
 
-        try:
-            repos = config.get(section, mode)
-        except (NoSectionError, NoOptionError):
-            continue
-        else:
-            repos = repos.split()
+    mapping = None
+    try:
+        users = config.get_repo(repo, mode)
+    except GitoliteConfigException:
+        log.exception("When get '%s' of '%s':" % (mode, repo))
+        return
 
-        for r in repos:
-            if r == path: # exactly match: match [repo %s] or implict [repo %s]
+    if user in users:
+        mapping = path
+    else:
+        for groupname in group.getMembership(config=config, user=user):
+            if groupname in users:
                 mapping = path
+                detail.append("as group '%s'" % groupname)
                 break
+            
+    if mapping is not None:
+        if detail:
+            detail = '(%s)' % ', '.join(detail)
+        else:
+            detail = ''
 
-            try:
-                p = config.get('repo %s' % r, 'path')
-            except (NoSectionError, NoOptionError):
-                pass
-            else:
-                if re.match(p, path):
-                    mapping = path
-                    reason = ' ([repo %s].path=%r)' % (r, p)
-                    break
+        log.debug(
+            'Access ok for %(user)r as %(mode)r on %(path)r(%(detail)s)'
+            % dict(
+            user=user,
+            mode=mode,
+            path=path,
+            detail=detail
+            ))
 
-        if mapping is not None:
-            log.debug(
-                'Access ok for %(user)r as %(mode)r on %(path)r%(reason)s'
-                % dict(
-                user=user,
-                mode=mode,
-                path=path,
-                reason=reason,
-                ))
+        prefix = config.get_gitosis('repositories')
+        if prefix == None:
+            prefix = 'repositories'
 
-            prefix = None
-            try:
-                prefix = config.get('gitosis', 'repositories')
-            except (NoSectionError, NoOptionError):
-                prefix = 'repositories'
-
-            log.debug(
-                'Using prefix %(prefix)r for %(path)r'
-                % dict(
-                prefix=prefix,
-                path=mapping,
-                ))
-            return (prefix, mapping)
+        log.debug(
+            'Using prefix %(prefix)r for %(path)r'
+            % dict(
+            prefix=prefix,
+            path=mapping,
+            ))
+        return (prefix, mapping)

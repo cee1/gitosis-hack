@@ -9,7 +9,7 @@ import sys
 
 from pkg_resources import resource_filename
 from cStringIO import StringIO
-from ConfigParser import RawConfigParser
+from gitosis.gitoliteConfig import GitoliteConfig
 
 from gitosis import repository
 from gitosis import run_hook
@@ -79,16 +79,12 @@ def init_admin_repository(
         )
     if not repository.has_initial_commit(git_dir):
         log.info('Making initial commit...')
-        # ConfigParser does not guarantee order, so jump through hoops
-        # to make sure [gitosis] is first
-        cfg_file = StringIO()
-        print >>cfg_file, '[gitosis]'
-        print >>cfg_file
-        cfg = RawConfigParser()
-        cfg.add_section('group gitosis-admin')
-        cfg.set('group gitosis-admin', 'members', user)
-        cfg.set('group gitosis-admin', 'writable', 'gitosis-admin')
-        cfg.write(cfg_file)
+
+        cfg = GitoliteConfig()
+        cfg.set_group_members('@gitosis-admin', [user])
+        cfg.set_repo('gitosis-admin', 'RW+', ['@gitosis-admin'])
+
+        cfg_file = cfg.serialize()
         initial_commit(
             git_dir=git_dir,
             cfg=cfg_file.getvalue(),

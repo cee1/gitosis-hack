@@ -30,7 +30,7 @@ def post_update(cfg, git_dir):
         os.path.join(export, '..', 'gitosis.conf'),
         )
     # re-read config to get up-to-date settings
-    cfg.read(os.path.join(export, '..', 'gitosis.conf'))
+    cfg.load(file(os.path.join(export, '..', 'gitosis.conf'), 'r'))
 
     util.RepositoryDir(cfg,
                   (

@@ -1,7 +1,7 @@
 import errno
 import logging
 import os
-from ConfigParser import NoSectionError, NoOptionError
+from gitosis.gitoliteConfig import GitoliteConfigException
 
 log = logging.getLogger('gitosis.gitdaemon')
 from gitosis import util
@@ -27,27 +27,20 @@ def deny_export(repopath):
 class DaemonProp(util.RepoProp):
     name = "daemon"
 
-    def _get(self, config, section):
-        if not hasattr(self, 'default_value'):
-            try:
-                val = config.getboolean('gitosis', self.name)
-            except (NoSectionError, NoOptionError):
-                val = False
-            self.default_value = val
-
-            log.debug(
-                'Global default is %r',
-                {True: 'allow', False: 'deny'}.get(val),
-            )
-
+    def _get(self, config, reponame):
         try:
-            val = config.getboolean(section, self.name)
-        except (NoSectionError, NoOptionError):
-            val = self.default_value
-        return val
+            users = config.get_repo(reponame, 'R')
+        except GitoliteConfigException:
+            log.exception('Failed to get users that can read(Only) repo \'%s\'' % reponame)
+            return
 
-    def action(self, repobase, reponame, enable):
-        path = os.path.join(repobase, reponame + '.git')
+        if users and 'daemon' in users:
+            return True
+
+        return False
+
+    def action(self, repobase, name, reponame, enable):
+        path = os.path.join(repobase, name + '.git')
         if enable:
             log.debug('Allow %r', path)
             allow_export(path)

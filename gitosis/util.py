@@ -2,7 +2,8 @@ import errno
 import os
 import logging
 import re
-from ConfigParser import NoSectionError, NoOptionError, RawConfigParser
+from gitosis.gitoliteConfig import GitoliteConfigException
+from base64 import urlsafe_b64decode
 
 def mkdir(*a, **kw):
     try:
@@ -15,25 +16,23 @@ def mkdir(*a, **kw):
 
 def getRepositoryDir(config):
     repositories = os.path.expanduser('~')
-    try:
-        path = config.get('gitosis', 'repositories')
-    except (NoSectionError, NoOptionError):
+
+    path = config.get_gitosis('repositories')
+    if path == None:
         repositories = os.path.join(repositories, 'repositories')
     else:
         repositories = os.path.join(repositories, path)
     return repositories
 
 def getGeneratedFilesDir(config):
-    try:
-        generated = config.get('gitosis', 'generate-files-in')
-    except (NoSectionError, NoOptionError):
+    generated = config.get_gitosis('generate-files-in')
+    if generated == None:
         generated = os.path.expanduser('~/gitosis')
     return generated
 
 def getSSHAuthorizedKeysPath(config):
-    try:
-        path = config.get('gitosis', 'ssh-authorized-keys-path')
-    except (NoSectionError, NoOptionError):
+    path = config.get_gitosis('ssh-authorized-keys-path')
+    if path == None:
         path = os.path.expanduser('~/.ssh/authorized_keys')
     return path
 
@@ -48,20 +47,24 @@ def _extract_reldir(topdir, dirpath):
 class RepoProp(object):
     name = "Unknown"
  
-    def action(self, repobase, reponame, val):
+    def action(self, repobase, name, reponame, val):
         """action for this prop"""
 
-    def _get(self, config, section):
+    def _get(self, config, reponame):
         try:
-            val = config.get(section, self.name)
-        except (NoSectionError, NoOptionError):
+            val = config.get_repo(reponame, self.name)
+        except GitoliteConfigException:
+            log.exception("Error to get property '%s' on repo '%s'" % (self.name, reponame))
             val = None
         return val
 
-    def trigger(self, config, section, repobase, reponame):
-        val = self._get(config, section)
+    def trigger(self, config, repobase, name, reponame):
+        # repobas -- repositories dir
+        # name    -- repositories relative path with '.git' stripped
+        # reponame -- name of the repo which @name belongs to
+        val = self._get(config, reponame)
         if val != None:
-            self.action(repobase, reponame, val)
+            self.action(repobase, name, reponame, val)
     
 class RepositoryDir(object):
     log = logging.getLogger('gitosis.RepositoryDir')
@@ -70,21 +73,6 @@ class RepositoryDir(object):
         self.repositories = getRepositoryDir(config)
         self.config = config
         self.props = props
-
-    def __collect_pattern(self):
-        if hasattr(self, 'repo_patterns'):
-            return
-
-        config = self.config
-        repo_patterns = {}
-        for section in config.sections():
-            if section.startswith('repo ') and config.has_option(section, 'path'):
-                try:
-                    r = re.compile(config.get(section, 'path'))
-                    repo_patterns[r] = section
-                except re.Error:
-                    self.log.debug('Bad regex express for section %r', section)
-        self.repo_patterns = repo_patterns
 
     def travel(self):
         repositories = self.repositories
@@ -127,15 +115,39 @@ class RepositoryDir(object):
         config = self.config
         props = self.props
 
-        self.__collect_pattern()
+        repo = None
+        try:
+            repo = config.lookup_repo(name)
+        except GitoliteConfigException:
+            self.log.exception("When visit repo '%s'" % repo)
+            return
 
-        for p in self.repo_patterns:
-            if p.match(name):
-                section = self.repo_patterns[p]
-                break
-        else:
-            section = 'repo %s' % name
+        if not repo:
+            self.log.warning("No repo contains '%s'" % name)
+            return
 
         for p in props:
-            p.trigger(config, section, repositories, name)
+            p.trigger(config, repositories, name, repo)
 
+def parse_bool(val):
+    if val in ('Yes',   'yes',  'YES',
+               'True',  'true', 'TRUE',
+               'On',    'on',   'ON',
+               '1'):
+        return True
+
+    return False
+
+def decode_id(encoded_id):
+    prefix = 'git'
+    _id = ''
+
+    if encoded_id.startswith(prefix):
+        _id = encoded_id[len(prefix):]
+        _id = _id.replace('.', '=')
+        _id = urlsafe_b64decode(_id)
+
+        if '\n' in _id:
+            _id = ''
+
+    return _id

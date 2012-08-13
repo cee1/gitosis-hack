@@ -44,6 +44,9 @@ class UnknownCommandError(ServingError):
 class UnsafeArgumentsError(ServingError):
     """Arguments to command look dangerous"""
 
+class BadEncodedID(ServingError):
+    """Bad encoded user id"""
+
 class AccessDenied(ServingError):
     """Access denied to repository"""
 
@@ -90,44 +93,35 @@ def serve(
 
     path = match.group('path')
 
-    # write access is always sufficient
+    decode_id = cfg.get_gitosis('decodeID')
+    if decode_id and util.parse_bool(decode_id):
+        encoded_user = user
+        user = util.decode_id(encoded_user)
+
+        log.debug("decodeID = yes, decode '%s' as '%s'" % (encoded_user, user))
+
+        if not user:
+            raise BadEncodedID()
+
     newpath = access.haveAccess(
-        config=cfg,
-        user=user,
-        mode='writable',
-        path=path)
-
-    if newpath is None:
-        # didn't have write access; try once more with the popular
-        # misspelling
-        newpath = access.haveAccess(
             config=cfg,
             user=user,
-            mode='writeable',
-            path=path)
-        if newpath is not None:
-            log.warning(
-                'Repository %r config has typo "writeable", '
-                +'should be "writable"',
-                path,
-                )
-
-    if newpath is None:
-        # didn't have write access
-
-        newpath = access.haveAccess(
-            config=cfg,
-            user=user,
-            mode='readonly',
+            mode='RW+',
             path=path)
 
-        if newpath is None:
-            raise ReadAccessDenied()
-
+    if newpath == None:
         if verb in COMMANDS_WRITE:
-            # didn't have write access and tried to write
             raise WriteAccessDenied()
+        else:
+            newpath = access.haveAccess(
+                config=cfg,
+                user=user,
+                mode='R',
+                path=path)
 
+            if newpath == None:
+                raise ReadAccessDenied()
+    
     (repobase, reponame) = newpath
     assert not reponame.endswith('.git'), \
            'git extension should have been stripped: %r' % reponame

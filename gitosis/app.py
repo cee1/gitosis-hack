@@ -3,7 +3,7 @@ import sys
 import logging
 import optparse
 import errno
-import ConfigParser
+from gitosis import gitoliteConfig
 
 log = logging.getLogger('gitosis.app')
 
@@ -53,7 +53,7 @@ class App(object):
         return parser
 
     def create_config(self, options):
-        cfg = ConfigParser.RawConfigParser()
+        cfg = gitoliteConfig.GitoliteConfig()
         return cfg
 
     def read_config(self, options, cfg):
@@ -67,15 +67,14 @@ class App(object):
             else:
                 raise CannotReadConfigError(str(e))
         try:
-            cfg.readfp(conffile)
+            cfg.load(conffile)
         finally:
             conffile.close()
 
     def setup_logging(self, cfg):
         try:
-            loglevel = cfg.get('gitosis', 'loglevel')
-        except (ConfigParser.NoSectionError,
-                ConfigParser.NoOptionError):
+            loglevel = cfg.get_gitosis('loglevel')
+        except gitoliteConfig.GitoliteConfigException:
             pass
         else:
             try:
