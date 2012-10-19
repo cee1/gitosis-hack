@@ -9,24 +9,25 @@ def _getMembership(config, user, seen):
             members = config.get_group_members(group)
         except GitoliteConfigException:
             log.exception("When list members of '%s':" % group)
-            members = []
+            members = None
 
-        # @all is the only group where membership needs to be
-        # bootstrapped like this, anything else gets started from the
-        # username itself
-        if (user in members
-            or '@all' in members):
-            log.debug('found %(user)r in %(group)r' % dict(
-                user=user,
-                group=group,
-                ))
-            seen.add(group)
-            yield group
+        if members:
+            # @all is the only group where membership needs to be
+            # bootstrapped like this, anything else gets started from the
+            # username itself
+            if (user in members
+                or '@all' in members):
+                log.debug('found %(user)r in %(group)r' % dict(
+                    user=user,
+                    group=group,
+                    ))
+                seen.add(group)
+                yield group
 
-            for member_of in _getMembership(
-                config, group, seen,
-                ):
-                yield member_of
+                for member_of in _getMembership(
+                    config, group, seen,
+                    ):
+                    yield member_of
 
 
 def getMembership(config, user):

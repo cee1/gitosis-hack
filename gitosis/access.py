@@ -51,14 +51,15 @@ def haveAccess(config, user, mode, path):
         log.exception("When get '%s' of '%s':" % (mode, repo))
         return
 
-    if user in users:
-        mapping = path
-    else:
-        for groupname in group.getMembership(config=config, user=user):
-            if groupname in users:
-                mapping = path
-                detail.append("as group '%s'" % groupname)
-                break
+    if users:
+        if user in users:
+            mapping = path
+        else:
+            for groupname in group.getMembership(config=config, user=user):
+                if groupname in users:
+                    mapping = path
+                    detail.append("as group '%s'" % groupname)
+                    break
             
     if mapping is not None:
         if detail:
