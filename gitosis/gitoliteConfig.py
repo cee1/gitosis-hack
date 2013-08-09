@@ -109,7 +109,8 @@ class GitoliteConfig(object):
 		self.__global = {
 			"gitosis" : {
 				'loglevel' 	: 'INFO',
-				'decodeID' 	: 'no'
+				'decodeID' 	: 'no',
+				'extProps'	: '',
 			},
 		}
 		self.__groups = {}

@@ -142,14 +142,36 @@ def serve(
             p = os.path.join(p, c)
             util.mkdir(p, 0750)
 
+        props = (gitdaemon.DaemonProp(),
+          gitweb.GitwebProp(), gitweb.DescriptionProp(), gitweb.OwnerProp())
+
+        ext_props = cfg.get_gitosis('extProps') or ()
+        if ext_props:
+            try:
+                ext_props_expanded = os.path.join(
+                  os.path.expanduser('~'), ext_props)
+                dir_ = os.path.dirname(ext_props_expanded)
+                file_ = os.path.basename(ext_props_expanded)
+                mod_, ext_ = os.path.splitext(file_)
+                assert mod_, "'%s': empty module name" % file_
+                assert ext_ == '.py', "the extname of '%s' is not '.py'" % file_
+
+                sys.path.append(dir_)
+                mod_ = __import__(mod_)
+                ext_props_ = mod_.get_props()
+            except (AssertionError, ImportError) as e:
+                log.warning("Invalid extProps value '%s': %s" % \
+                  (ext_props, str(e)))
+                ext_props = ()
+            except:
+                log.warning("Bad module '%s': %s" % \
+                  (ext_props, str(sys.exc_info()[1])))
+                ext_props = ()
+            else:
+                ext_props = ext_props_
+
         repository.init(path=fullpath)
-        util.RepositoryDir(cfg,
-                  (
-                  gitdaemon.DaemonProp(),
-                  gitweb.GitwebProp(),
-                  gitweb.DescriptionProp(),
-                  gitweb.OwnerProp()
-                  )).visit_one(reponame)
+        util.RepositoryDir(cfg, props + ext_props).visit_one(reponame)
         generated = util.getGeneratedFilesDir(config=cfg)
         gitweb.ProjectList(
                           os.path.join(generated, 'projects.list')
